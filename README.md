@@ -24,10 +24,9 @@ mirrors `../wallet/deploy/region.sh` (`/l0/*`, `/l1/*`).
 ## Quick start
 
 ```bash
-npm install
-npm run build
-ALLOW_IPS=<your-ip> L0_UPSTREAMS=https://eu1.bigtangle.org \
-  L1_UPSTREAMS=https://ordereu1.bigtangle.org npm start
+git clone https://github.com/bigt-ai-platform/apiserver.git && cd apiserver
+ALLOW_IPS=<your-ip> ./install.sh --yes    # deps + build + .env (see install.sh -h)
+npm start                                 # reads .env
 ```
 
 Verify:
@@ -189,6 +188,40 @@ The relay is co-located with whatever the group can reach:
   `INDEXER_URL`, `DAI_URL`. If the group only needs the wallet's chain API,
   leave all role vars unset — those routes then 404.
 
+## Deploy to the fleet (s1002)
+
+Wallet-style release scripts (`deploy.sh` + `deploy/region.{conf,sh}`, analog
+`../wallet/deploy/`) push the committed tree to the VM, build there, install a
+systemd unit and (optionally) the Caddy TLS vhost:
+
+```bash
+# deploy + build + restart on s1002 (92.5.34.128, jump via s1001, SSH ubuntu)
+ALLOW_IPS=203.0.113.7,10.9.0.0/16 ./deploy.sh
+
+# same, plus the https://s1002.bigta.ai vhost on the host Caddy
+ALLOW_IPS=203.0.113.7 ./deploy.sh --caddy
+
+# ops
+./deploy.sh --status | --health | --logs 100 | --stop
+./deploy.sh --dry-run          # print the plan only
+```
+
+Notes:
+
+- `ALLOW_IPS` is **required** (the deploy aborts on an empty allowlist;
+  `ALLOW_ALL=1` is the throwaway-lab escape hatch).
+- Only the committed tree is shipped (`git archive HEAD`) — commit before
+  deploying; a dirty tree just prints a warning.
+- The VM needs outbound npm (on-VM `npm ci && npm run build`) and passwordless
+  sudo for systemd/caddy; Node ≥ 20 is installed via NodeSource if missing.
+- `s1002.bigta.ai` must resolve to the VM for ACME; until DNS exists use
+  `CADDY_TLS_MODE=internal` (SDK clients accept the local-CA cert).
+- The relay binds `127.0.0.1:8080`; only Caddy is public. Members then set
+  Server URL `https://s1002.bigta.ai/l0/`, L1 URL `https://s1002.bigta.ai/l1/`,
+  autoDiscover **off**.
+- Region map (VM, SSH user/key, jump host, domain, upstreams): edit
+  `deploy/region.conf` — same knobs as `../wallet/deploy/region.conf`.
+
 ## Security checklist
 
 - [ ] `ALLOW_IPS` set to the group's addresses — empty means the whole internet
@@ -211,7 +244,11 @@ The relay is co-located with whatever the group can reach:
 | `src/ip.ts` | allowlist: exact IP + IPv4 CIDR, `::ffff:` normalization, `X-Forwarded-For` |
 | `src/chain.ts` | upstream failover, write/read retry rules, header filtering |
 | `src/server.ts` | Fastify app: allowlist hook, `/l0` `/l1` replay, dai role proxy, `/healthz`, `/seed.json` |
-| `src/index.ts` | entrypoint + graceful shutdown |
+| `src/index.ts` | entrypoint + graceful shutdown (loads `.env`) |
+| `install.sh` | local setup: node check, build, `.env`, optional systemd/caddy |
+| `deploy.sh` | fleet entrypoint: deploy/status/health/logs/stop (wallet-style) |
+| `deploy/region.conf` | region map: VM, SSH user/key, jump host, domain, relay env |
+| `deploy/region.sh` | per-VM workhorse: git archive → npm build → systemd → healthz |
 | `test/relay.e2e.test.ts` | e2e suite against mock L0/L1/dai upstreams (`npm test`) |
 
 ## e2e tests
