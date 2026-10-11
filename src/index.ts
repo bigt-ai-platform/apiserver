@@ -1,0 +1,30 @@
+import { buildApp } from "./server.js";
+import { loadConfig } from "./config.js";
+
+async function main(): Promise<void> {
+  const config = loadConfig();
+  const app = buildApp(config);
+  const shutdown = async (): Promise<void> => {
+    await app.close();
+    process.exit(0);
+  };
+  process.on("SIGINT", () => void shutdown());
+  process.on("SIGTERM", () => void shutdown());
+  await app.listen({ port: config.port, host: config.host });
+  app.log.info(
+    {
+      host: config.host,
+      port: config.port,
+      allowlist: config.allowIps,
+      l0: config.l0Upstreams,
+      l1: config.l1Upstreams,
+      roles: Object.keys(config.roles),
+    },
+    "apiserver relay listening",
+  );
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
